@@ -1,54 +1,78 @@
-import express                                 from 'express';
-import path                                    from 'path';
-import cookieParser                            from 'cookie-parser';
-//import logger from 'morgan';
-import dotenv                                  from 'dotenv';
-import bodyparser                              from 'body-parser';
-//security and protecting endpoints
-//logging and monitoring
-import { exceptionHandler}                     from './ca_presentation/middleware/errorhandling/errorhandler';
-import { metricsEndpoint, metricsMiddleware }  from './ca_presentation/monitoring/prometheus';
-import { logRequest }                          from './ca_infrastructure/logging/requestlogger';
-//Application end-point routes
-import productroutes                           from './ca_presentation/routes/productroutes';
-import customerroutes                          from './ca_presentation/routes/customerroutes';
-import orderroutes                             from './ca_presentation/routes/orderroutes';
-import userroutes                              from './ca_presentation/routes/userroutes';
+import express from 'express';
+import cors from 'cors';
+import helmet from 'helmet';
+import { rateLimit } from 'express-rate-limit';
+import type { Config } from './config';
+import type { CatalogRepository } from './ca_domain/ports';
+import { AppError } from './ca_domain/errors';
+import { OrderService } from './ca_application/orders';
+import { createCatalogRouter } from './ca_presentation/routes/catalog';
+import { createOrdersRouter } from './ca_presentation/routes/orders';
+import { createUsersRouter } from './ca_presentation/routes/users';
+import { authenticate } from './ca_presentation/security';
+import { observability, type Log } from './ca_presentation/observability';
+import { errorHandler } from './ca_presentation/errors';
 
-//loading environment variables from .env file
-dotenv.config();
-
-//Creating express app
-const app = express();
-
-
-//Adding the middleware 
-//app.use(logger('dev'));
-app.use(express.json());
-app.use(express.urlencoded({ extended: false }));
-app.use(bodyparser.json());
-app.use(cookieParser());
-
-//Add prometheus
-app.use(metricsMiddleware);
-
-// Add Loki middleware
-if (process.env.LOKI_ENABLED === 'true') 
-{
-    app.use(logRequest);
+export type Dependencies = {
+  config: Config;
+  catalog: CatalogRepository;
+  orders: OrderService;
+  ready: () => Promise<void>;
+  log: Log;
+};
+export function createApp({ config, catalog, orders, ready, log }: Dependencies) {
+  const app = express();
+  const metrics = observability(log);
+  let draining = false;
+  app.disable('x-powered-by');
+  app.set('trust proxy', false);
+  app.use(metrics.middleware, helmet());
+  const origins = new Set(config.CORS_ORIGINS.split(',').filter(Boolean));
+  app.use(
+    cors({
+      origin: (origin, cb) => cb(null, !!origin && origins.has(origin)),
+      methods: ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+      allowedHeaders: ['Content-Type', 'x-api-key', 'Idempotency-Key'],
+      exposedHeaders: ['x-request-id'],
+    }),
+  );
+  app.get('/health/live', (_req, res) => {
+    res.json({ status: 'alive' });
+  });
+  app.get('/health/ready', async (_req, res) => {
+    if (draining) throw new AppError(503, 'UNAVAILABLE', 'Server is shutting down');
+    try {
+      await ready();
+    } catch {
+      throw new AppError(503, 'UNAVAILABLE', 'Database is unavailable');
+    }
+    res.json({ status: 'ready' });
+  });
+  app.use(
+    '/api',
+    rateLimit({
+      windowMs: 60000,
+      limit: config.RATE_LIMIT_MAX,
+      standardHeaders: 'draft-8',
+      legacyHeaders: false,
+      handler: (_req, _res, next) => next(new AppError(429, 'RATE_LIMITED', 'Too many requests')),
+    }),
+    authenticate(config),
+    express.json({ limit: '128kb', inflate: false }),
+  );
+  app.use(
+    '/api',
+    createCatalogRouter(catalog),
+    createOrdersRouter(orders),
+    createUsersRouter(catalog),
+  );
+  app.use((_req, _res, next) => next(new AppError(404, 'NOT_FOUND', 'Route not found')));
+  app.use(errorHandler(log));
+  return {
+    app,
+    register: metrics.register,
+    drain: () => {
+      draining = true;
+    },
+  };
 }
-
-//Routes
-app.use('/api/product', productroutes);
-app.use('/api/customer', customerroutes);
-app.use('/api/order', orderroutes);
-app.use('/api/user', userroutes);
-// Expose the metrics at /metrics endpoint
-app.get('/metrics', metricsEndpoint);
-
-app.use(express.static(path.join(__dirname, 'public')));
-
-//Global Exception handler 
-app.use(exceptionHandler);
-
-export default app; //to create server in www.ts

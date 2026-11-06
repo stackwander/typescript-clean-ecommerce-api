@@ -1,103 +1,79 @@
-#!/usr/bin/env node
+import 'dotenv/config';
+import http from 'node:http';
+import { PrismaClient } from '@prisma/client';
+import { loadConfig } from '../config';
+import { createApp } from '../app';
+import { PrismaCatalog } from '../ca_infrastructure/database/catalog';
+import { PrismaOrders } from '../ca_infrastructure/database/orders';
+import { OrderService } from '../ca_application/orders';
+import { logger } from '../ca_infrastructure/logging/logger';
+import { assertDatabaseContract } from '../ca_infrastructure/database/contract';
 
-/**
- * Module dependencies.
- */
-
-import app from '../app';
-import debug from 'debug'
-import http from 'http';
-
-const debugLog = debug('backendcleants:server');
-
-/**
- * Get port from environment and store in Express.
- */
-
-//const hostname = "0.0.0.0"
-//const port = normalizePort(process.env.PORT || '3000');
-
-const hostname = '0.0.0.0'; // IP address
-const port = 3000; // Port number
-app.set('port', port);
-
-/**
- * Create HTTP server.
- */
-
-const server = http.createServer(app);
-
-/**
- * Listen on provided port, on all network interfaces.
- */
-
-server.listen(port, hostname, () => { console.log(`Server is running on port ${port}`);});
-
-server.on('error', onError);
-server.on('listening', onListening);
-
-/**
- * Normalize a port into a number, string, or false.
- */
-
-function normalizePort(val: string): number | string | boolean {
-  const portNum: number = parseInt(val, 10);
-
-  if (isNaN(portNum)) {
-    // named pipe
-    return val;
-  }
-
-  if (portNum >= 0) {
-    // port number
-    return portNum;
-  }
-
-  return false;
-}
-
-/**
- * Event listener for HTTP server "error" event.
- */
-
-function onError(error: NodeJS.ErrnoException): void {
-  if (error.syscall !== 'listen') {
+async function main() {
+  const config = loadConfig();
+  const db = new PrismaClient({ datasources: { db: { url: config.MONGODB_URL } } });
+  await db.$connect();
+  try {
+    await assertDatabaseContract(db);
+  } catch (error) {
+    await db.$disconnect();
     throw error;
   }
-
-  const bind = typeof port === 'string'
-    ? 'Pipe ' + port
-    : 'Port ' + port;
-
-  // handle specific listen errors with friendly messages
-  switch (error.code) {
-    case 'EACCES':
-      console.error(bind + ' requires elevated privileges');
-      process.exit(1);
-      break;
-    case 'EADDRINUSE':
-      console.error(bind + ' is already in use');
-      process.exit(1);
-      break;
-    default:
-      throw error;
-  }
+  const { app, register, drain } = createApp({
+    config,
+    catalog: new PrismaCatalog(db),
+    orders: new OrderService(new PrismaOrders(db), config.CURRENCY),
+    ready: async () => {
+      await db.$runCommandRaw({ ping: 1 });
+    },
+    log: logger,
+  });
+  const server = http.createServer(app);
+  server.requestTimeout = 30000;
+  server.headersTimeout = 10000;
+  // Private listener: never published by Compose or routed through Kong.
+  const metrics = http.createServer(async (req, res) => {
+    if (req.url !== '/metrics') {
+      res.writeHead(404).end();
+      return;
+    }
+    try {
+      res.setHeader('Content-Type', register.contentType);
+      res.end(await register.metrics());
+    } catch {
+      res.writeHead(500).end();
+    }
+  });
+  server.listen(config.PORT, '0.0.0.0', () => logger.info('API listening', { port: config.PORT }));
+  metrics.listen(9464, '0.0.0.0');
+  let closing = false;
+  const shutdown = async () => {
+    if (closing) return;
+    closing = true;
+    drain();
+    const timer = setTimeout(() => process.exit(1), 20000).unref();
+    await Promise.all([
+      new Promise<void>((resolve) => server.close(() => resolve())),
+      new Promise<void>((resolve) => metrics.close(() => resolve())),
+    ]);
+    await db.$disconnect();
+    register.clear();
+    clearTimeout(timer);
+  };
+  server.on('error', () => {
+    logger.error('HTTP listener failed', {});
+    void shutdown().finally(() => process.exit(1));
+  });
+  metrics.on('error', () => {
+    logger.error('Metrics listener failed', {});
+    void shutdown().finally(() => process.exit(1));
+  });
+  for (const signal of ['SIGINT', 'SIGTERM'])
+    process.on(signal, () => {
+      void shutdown();
+    });
 }
-
-/**
- * Event listener for HTTP server "listening" event.
- */
-
-function onListening(): void {
-  const addr = server.address();
-  if (addr) { // Check if addr is not null
-    const bind = typeof addr === 'string'
-      ? 'pipe ' + addr
-      : 'port ' + addr.port;
-    debugLog('Listening on ' + bind);
-  } else {
-    // Handle the case where addr is null (server not bound)
-    debugLog('Server listening but address is not yet available.'); 
-  }
-}
-
+void main().catch(() => {
+  logger.error('Startup failed; check configuration and database connectivity', {});
+  process.exit(1);
+});

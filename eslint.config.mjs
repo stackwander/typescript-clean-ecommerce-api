@@ -1,22 +1,12 @@
-import { FlatCompat } from '@eslint/eslintrc';
-import tsParser from '@typescript-eslint/parser';
 import js from '@eslint/js';
-
-const compat = new FlatCompat({
-  recommendedConfig: js.configs.recommended,
-});
-
-export default [
+import ts from 'typescript-eslint';
+import globals from 'globals';
+export default ts.config(
+  { ignores: ['dist/**', 'node_modules/**'] },
+  js.configs.recommended,
+  ...ts.configs.recommended,
   {
-    files: ['src/**/*.ts'],
-    languageOptions: {
-      parser: tsParser,
-      ecmaVersion: 2020,
-      sourceType: 'module',
-    },
-    rules: {
-      // Add your TypeScript-specific rules here
-    },
+    languageOptions: { globals: globals.node },
+    rules: { '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_' }] },
   },
-  ...compat.extends('eslint:recommended', 'plugin:@typescript-eslint/recommended'),
-];
+);

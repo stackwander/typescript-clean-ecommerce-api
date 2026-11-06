@@ -1,0 +1,91 @@
+generator client {
+  provider = "prisma-client-js"
+}
+datasource db {
+  provider = "mongodb"
+  url      = env("MONGODB_URL")
+}
+enum OrderStatus {
+  pending
+  shipped
+  cancelled
+}
+enum UserRole {
+  operator
+  admin
+}
+enum UserStatus {
+  active
+  disabled
+}
+model Customer {
+  customerCode     String   @id @default(auto()) @map("_id") @db.ObjectId
+  customerName     String
+  cemail           String   @unique
+  phone            String
+  address          String
+  city             String
+  postalCode       String
+  country          String
+  creationDate     DateTime @default(now())
+  modificationDate DateTime @updatedAt
+  revision         Int      @default(0)
+  orders           Order[]
+  @@index([customerName, customerCode])
+}
+model Product {
+  productCode        String   @id @default(auto()) @map("_id") @db.ObjectId
+  productName        String
+  productvendor      String
+  productDescription String
+  quantityInStock    Int
+  buyPrice           Int
+  msrp               Int
+  creationDate       DateTime @default(now())
+  modificationDate   DateTime @updatedAt
+  revision           Int      @default(0)
+  orderItems         OrderItem[]
+  @@index([productName, productCode])
+}
+model Order {
+  orderId        String      @id @default(auto()) @map("_id") @db.ObjectId
+  customerId     String      @db.ObjectId
+  customer       Customer    @relation(fields: [customerId], references: [customerCode], onDelete: NoAction, onUpdate: NoAction)
+  orderDate      DateTime    @default(now())
+  shippingDate   DateTime?
+  status         OrderStatus @default(pending)
+  comments       String
+  total          Int
+  currency       String
+  paid           Boolean     @default(false)
+  deletedAt      DateTime?
+  revision       Int         @default(0)
+  idempotencyKey String      @unique
+  requestHash    String
+  orderItems     OrderItem[]
+  @@index([customerId, deletedAt, orderId])
+  @@index([deletedAt, orderId])
+}
+model OrderItem {
+  orderitemId String  @id @default(auto()) @map("_id") @db.ObjectId
+  orderId     String  @db.ObjectId
+  order       Order   @relation(fields: [orderId], references: [orderId], onDelete: NoAction, onUpdate: NoAction)
+  productId   String  @db.ObjectId
+  product     Product @relation(fields: [productId], references: [productCode], onDelete: NoAction, onUpdate: NoAction)
+  productName String
+  unitPrice   Int
+  quantity    Int
+  @@unique([orderId, productId])
+  @@index([productId])
+}
+model User {
+  userId    String     @id @default(auto()) @map("_id") @db.ObjectId
+  username  String     @unique
+  email     String     @unique
+  role      UserRole
+  status    UserStatus
+  firstName String?
+  lastName  String?
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+}

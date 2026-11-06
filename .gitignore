@@ -3,3 +3,12 @@ node_modules/
 
 # Ignore dist folder
 dist/
+
+.env
+.env.*
+!.env.example
+var/
+coverage/
+*.log
+.test-results/
+.compose.*.yml

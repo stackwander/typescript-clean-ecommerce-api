@@ -1,0 +1,65 @@
+@baseUrl = http://localhost:8000
+@readKey = REPLACE_WITH_READ_KEY
+@writeKey = REPLACE_WITH_WRITE_KEY
+@adminKey = REPLACE_WITH_ADMIN_KEY
+@customerId = REPLACE_WITH_CUSTOMER_OBJECT_ID
+@productId = REPLACE_WITH_PRODUCT_OBJECT_ID
+@orderId = REPLACE_WITH_ORDER_OBJECT_ID
+
+### Health
+GET {{baseUrl}}/health/ready
+
+### Create customer
+POST {{baseUrl}}/api/customer
+x-api-key: {{writeKey}}
+Content-Type: application/json
+
+{"customerName":"Alice","cemail":"alice@example.com","phone":"555-0100","address":"1 Main Road","city":"Karachi","postalCode":"74000","country":"PK"}
+
+### Create product (prices in minor units)
+POST {{baseUrl}}/api/product
+x-api-key: {{writeKey}}
+Content-Type: application/json
+
+{"productName":"Widget","productvendor":"Example","productDescription":"Demo widget","quantityInStock":10,"buyPrice":100,"msrp":250}
+
+### List products
+GET {{baseUrl}}/api/product?offset=0&limit=20
+x-api-key: {{readKey}}
+
+### Create or replay an order; change the key for a new order
+POST {{baseUrl}}/api/order
+x-api-key: {{writeKey}}
+Idempotency-Key: example-order-0001
+Content-Type: application/json
+
+{"customerId":"{{customerId}}","comments":"Demo","orderItems":[{"productId":"{{productId}}","quantity":2}]}
+
+### Customer orders
+GET {{baseUrl}}/api/order/customer/{{customerId}}?limit=20
+x-api-key: {{readKey}}
+
+### Replace items before payment/shipping (retains existing line prices)
+PUT {{baseUrl}}/api/order/{{orderId}}
+x-api-key: {{writeKey}}
+Content-Type: application/json
+
+{"orderItems":[{"productId":"{{productId}}","quantity":3}]}
+
+### Confirm external settlement and ship (admin only)
+PUT {{baseUrl}}/api/order/{{orderId}}
+x-api-key: {{adminKey}}
+Content-Type: application/json
+
+{"paid":true,"status":"shipped"}
+
+### Add available stock using a delta
+POST {{baseUrl}}/api/product/{{productId}}/stock
+x-api-key: {{writeKey}}
+Content-Type: application/json
+
+{"delta":5}
+
+### Delete an unpaid, unshipped order; inventory is restored once
+DELETE {{baseUrl}}/api/order/{{orderId}}
+x-api-key: {{writeKey}}

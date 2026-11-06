@@ -1,0 +1,7 @@
+node_modules
+dist
+var
+.env*
+.compose.*.yml
+package-lock.json
+docs/openapi.json

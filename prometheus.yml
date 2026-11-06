@@ -1,7 +1,6 @@
 global:
   scrape_interval: 15s
-
 scrape_configs:
-  - job_name: 'api'
+  - job_name: api
     static_configs:
-      - targets: ['kong:8001']
+      - targets: [backendapi1:9464, backendapi2:9464]
