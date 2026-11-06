@@ -20,14 +20,6 @@ services and use cases. **Burhan Saadi — Architecture & Development.**
 > A customer-facing application needs a separate identity layer and ownership checks. Never embed
 > write/admin credentials in browser or mobile bundles.
 
-## 🎥 Video Tutorial
-
-[![Watch the tutorial on YouTube](https://img.youtube.com/vi/5aoPYlxv_MA/hqdefault.jpg)](https://www.youtube.com/watch?v=5aoPYlxv_MA&list=PLxhpwhPE6CABgYeed3YNs4HRCwPoln3j-&index=2)
-
-The repository has been improved since this video was recorded, while the core architecture and
-backend concepts remain the same. Some code, API contracts, dependencies, and setup steps now differ
-from the recording; follow this README for the current implementation and commands.
-
 ---
 
 ## 📐 Architecture & Flow
